@@ -24,7 +24,7 @@ const getRepoInfo = (url) => {
 }
 
 const allowedExtensions = [
-  ".js",".jsx",".ts",".tsx",".html",".css",".scss",".json",".md",".txt",".py",".java",".c",".cpp",".cs",".php",".rb",".go",".rs",".swift",".kt",".sql",".xml",".yml",".yaml"
+  ".js",".jsx",".ts",".tsx",".html",".css",".scss",".json",".md",".txt",".py",".java",".c",".cpp",".cs",".php",".rb",".go",".rs",".swift",".kt",".sql",".xml",".yml",".yaml",".mjs"
 ]
 
 const ignoredFolders = [
@@ -32,6 +32,7 @@ const ignoredFolders = [
 ]
 
 const isAllowedFile = (name) => {
+  if(name.toLowerCase().includes("readme")) return false
   return allowedExtensions.some(ext => name.toLowerCase().endsWith(ext))
 }
 
@@ -41,16 +42,21 @@ const readGithubRepo = async (githubLink) => {
 
   let projectCode = ""
   let filesRead = 0
-  const maxFiles = 50
-  const maxCharsPerFile = 50000
+  const maxFiles = 20
+  const maxCharsPerFile = 1500
 
   const readFolder = async (apiUrl) => {
 
     if (filesRead >= maxFiles) return
 
-    const res = await fetch(apiUrl,{headers:{ "User-Agent":"node"}})
+    const res = await fetch(apiUrl)
 
     const items = await res.json()
+
+    if(!Array.isArray(items)){
+  throw new Error("Invalid GitHub repo or API response")
+}
+
 
     for (const item of items) {
 
@@ -64,7 +70,7 @@ const readGithubRepo = async (githubLink) => {
 
       if (item.type === "file" && isAllowedFile(item.name)) {
 
-        const fileRes = await fetch(item.download_url,{headers:{ "User-Agent":"node"}})
+        const fileRes = await fetch(item.download_url)
 
         let content = await fileRes.text()
 
@@ -110,18 +116,20 @@ app.post("/api/chatai",async(req,res)=>{
       temperature:0,
       max_tokens:20,
       messages:[
-        {
-          role:"system",
-          content:"You are a hackathon judge. Return only a number between 0 and 100."
-        },
-        {
-          role:"user",
-          content:`Evaluate this project and return only score number.\n${projectCode}`
-        }
-      ]
+                  {
+                  role:"system",
+                  content:"You are a strict hackathon judge. You MUST return ONLY a single number between 0 and 100. Do NOT write any text, explanation, or words. Only the number."
+                  },
+                  {
+                  role:"user",
+                  content:`Score this GitHub project from 0 to 100 based on code quality. Only reply with a number.
+                    \n\n${projectCode}`
+                  }
+                ]
     })
 
     const aiReply = response.choices[0].message.content
+    console.log("AI reply:", aiReply)
 
     let score = null
 
@@ -130,11 +138,13 @@ app.post("/api/chatai",async(req,res)=>{
     if(numbers && numbers.length > 0){
       score = parseInt(numbers[0])
     }
-
     if(score === null){
-      score = Math.floor(Math.random()*30)+60
-    }
-
+  return res.status(500).json({
+    filesAnalyzed: filesRead,
+    error:"AI did not return a valid score",
+    aiReply: aiReply
+  })
+}
     res.json({
       filesAnalyzed: filesRead,
       score: score
