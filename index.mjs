@@ -42,7 +42,7 @@ const readGithubRepo = async (githubLink) => {
 
   let projectCode = ""
   let filesRead = 0
-  const maxFiles = 20
+  const maxFiles = 18
   const maxCharsPerFile = 1500
 
   const readFolder = async (apiUrl) => {
@@ -53,9 +53,9 @@ const readGithubRepo = async (githubLink) => {
 
     const items = await res.json()
 
-    if(!Array.isArray(items)){
-  throw new Error("Invalid GitHub repo or API response")
-}
+        if(!Array.isArray(items)){
+      throw new Error("Invalid GitHub repo or API response")
+    }
 
 
     for (const item of items) {
@@ -86,7 +86,7 @@ const readGithubRepo = async (githubLink) => {
 
   }
 
-  const rootApi = `https://api.github.com/repos/${owner}/${repo}/contents`
+  const rootApi = `https://api.github.com/repos/${owner}/${repo}/contents`;
 
   await readFolder(rootApi)
 
@@ -105,7 +105,7 @@ app.post("/api/chatai",async(req,res)=>{
 
   try{
 
-    const { message } = req.body
+    const { message,requirements } = req.body
     if(!message.includes("github.com")){
       return res.status(400).json({msg:"Invalid GitHub link"})
     }
@@ -114,16 +114,39 @@ app.post("/api/chatai",async(req,res)=>{
     const response = await groq.chat.completions.create({
       model:"llama-3.1-8b-instant",
       temperature:0,
-      max_tokens:20,
+      max_tokens:30,
       messages:[
                   {
                   role:"system",
-                  content:"You are a strict hackathon judge. You MUST return ONLY a single number between 0 and 100. Do NOT write any text, explanation, or words. Only the number."
+                  content:`You are a software project evaluator.
+
+                  Your job is to check whether each requirement is implemented in the given source code.
+
+                  Instructions:
+                  1. Read the list of requirements.
+                  2. Check if each requirement exists in the source code.
+                  3. Return result as JSON where each requirement maps to true or false.
+
+                  Example format:
+
+                  {
+                  "requirement 1": true/false,
+                  "requirement 2": false/true,
+                  "requirement 3": true/false,
+                  "requirement 4": true/false,
+                  "requirement 5": true/false
+                  }
+
+                  Return ONLY JSON. Do not write explanations.`
                   },
                   {
                   role:"user",
-                  content:`Score this GitHub project from 0 to 100 based on code quality. Only reply with a number.
-                    \n\n${projectCode}`
+                  content:`
+                  Requirements:
+                  ${requirements}
+                  Source Code:
+                  ${projectCode}
+                  `
                   }
                 ]
     })
@@ -131,24 +154,19 @@ app.post("/api/chatai",async(req,res)=>{
     const aiReply = response.choices[0].message.content
     console.log("AI reply:", aiReply)
 
-    let score = null
+    const result = JSON.parse(aiReply)
+    console.log(result)
 
-    const numbers = aiReply.match(/\d+/g)
+    const values = Object.values(result)
+    console.log(values)
 
-    if(numbers && numbers.length > 0){
-      score = parseInt(numbers[0])
-    }
-    if(score === null){
-  return res.status(500).json({
-    filesAnalyzed: filesRead,
-    error:"AI did not return a valid score",
-    aiReply: aiReply
-  })
-}
-    res.json({
-      filesAnalyzed: filesRead,
-      score: score
-    })
+    const total = values.length
+    console.log(total)
+    const implemented = values.filter(v => v === true).length
+
+    const score = Math.round((implemented / total) * 100)
+
+    res.json({score,filesRead})
 
   }catch(err){
 
